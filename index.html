@@ -1,1 +1,130 @@
-hello
+<!DOCTYPE html>
+<html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dashboard Supply Chain – Sep–Okt 2026</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root{--bg:#f4f7f5;--card:#fff;--tx:#1d2b24;--mu:#5d6d65;--bd:#dfe7e2;--g:#2f9e63;--o:#e8913a;--b:#3b7dd8;--r:#d9534f;--hd:#14532d}
+@media(prefers-color-scheme:dark){:root{--bg:#101814;--card:#1a2420;--tx:#e8f0eb;--mu:#9bb0a4;--bd:#2b3a33;--hd:#0c2a1a}}
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 system-ui,Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--tx)}
+header{background:var(--hd);color:#fff;padding:18px 22px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+h1{margin:0;font-size:22px}#src{font-size:13px;opacity:.85}#live{font-size:13px;margin-top:4px}
+button{background:#fff;color:#14532d;border:0;border-radius:8px;padding:9px 16px;font-weight:600;cursor:pointer}button:disabled{opacity:.5}
+main{max-width:1200px;margin:auto;padding:18px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:18px}
+.k,.c{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px 16px}
+.k small{color:var(--mu);display:block}.k b{font-size:26px;display:block}.k span{font-size:13px}.up{color:var(--g)}.dn{color:var(--r)}
+h2{font-size:18px;margin:26px 0 10px;padding-left:10px;border-left:5px solid var(--g)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px}
+.c h3{margin:0 0 8px;font-size:15px}.cv{position:relative;height:280px}
+.notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-top:12px}
+.n{background:var(--card);border:1px solid var(--bd);border-left:5px solid var(--o);border-radius:10px;padding:12px 14px;font-size:14px;white-space:pre-line}
+.n b{display:block;margin-bottom:4px;color:var(--o)}.n.e{color:var(--mu);font-style:italic;border-left-color:var(--bd)}
+table{width:100%;border-collapse:collapse;font-size:14px}td,th{padding:7px 8px;border-bottom:1px solid var(--bd);text-align:right}th:first-child,td:first-child{text-align:left}th{color:var(--mu);font-weight:600}
+</style></head><body>
+<header><div><h1>Dashboard Supply Chain · September–Oktober 2026</h1><div id="src"></div><div id="live"></div></div><button id="rf">⟳ Muat ulang</button></header>
+<main>
+<div class="kpis" id="kpis"></div>
+
+<h2>1. Supply Service Level (SSL)</h2>
+<div class="c"><h3>SSL Mingguan (Fulfilled ÷ Supply Order, dari sheet GD)</h3><div class="cv"><canvas id="c1"></canvas></div></div>
+<div class="grid" style="margin-top:14px">
+ <div class="c"><h3>SSL Bulanan</h3><div class="cv"><canvas id="c2"></canvas></div></div>
+ <div class="c"><h3>Supply Order vs Fulfilled Order (Rp)</h3><div class="cv"><canvas id="c3"></canvas></div></div>
+</div><div class="notes" id="n1"></div>
+
+<h2>2. Inventory Health Overview</h2>
+<div class="grid">
+ <div class="c"><h3>Nilai Stok: Awal, Akhir, Rata-rata (Rp)</h3><div class="cv"><canvas id="c4"></canvas></div></div>
+ <div class="c"><h3>DIO (hari) &amp; Inventory Turnover (ITR)</h3><div class="cv"><canvas id="c5"></canvas></div></div>
+ <div class="c"><h3>Ringkasan</h3><table id="t1"></table></div>
+</div><div class="notes" id="n2"></div>
+
+<h2>3. Waste Rate</h2>
+<div class="grid">
+ <div class="c"><h3>Waste Rate Bulanan (%)</h3><div class="cv"><canvas id="c6"></canvas></div></div>
+ <div class="c"><h3>Nilai Waste vs Total Inventory (Rp)</h3><div class="cv"><canvas id="c7"></canvas></div></div>
+</div><div class="notes" id="n3"></div>
+
+<h2>4. Logistic Distribution</h2>
+<div class="grid">
+ <div class="c"><h3>On-Time Delivery vs Failed Delivery (%)</h3><div class="cv"><canvas id="c8"></canvas></div></div>
+ <div class="c"><h3>Total Biaya Pengiriman (Rp)</h3><div class="cv"><canvas id="c9"></canvas></div></div>
+ <div class="c"><h3>Ringkasan Logistik</h3><table id="t2"></table></div>
+</div><div class="notes" id="n4"></div>
+</main>
+<script>
+const SHEET_URL="https://docs.google.com/spreadsheets/d/1pymfdzjA95Ec81-rGW-C8gypi-UWQsN7wz-mA2Yl3F4/edit?usp=sharing";
+const REFRESH_MIN=5;
+const SID=SHEET_URL.match(/\/d\/([\w-]+)/)[1];
+const MONTHS=[{n:"September",s:"Sep",ym:"2026-09"},{n:"Oktober",s:"Okt",ym:"2026-10"}];
+const $=s=>document.querySelector(s),nf=new Intl.NumberFormat("id-ID");
+function pd(v){if(typeof v!="string")return null;let m=v.match(/^Date\((\d+),(\d+),(\d+)/);
+ if(m)return m[1]+"-"+String(+m[2]+1).padStart(2,"0")+"-"+m[3].padStart(2,"0");
+ m=v.match(/^(\d{4})-(\d{2})-(\d{2})/);if(m)return m[1]+"-"+m[2]+"-"+m[3];
+ m=v.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})/);if(m)return m[3]+"-"+m[2].padStart(2,"0")+"-"+m[1].padStart(2,"0");return null}
+const num=v=>typeof v=="number"?v:(typeof v=="string"&&v.trim()!==""&&!isNaN(+v)?+v:0);
+const rp=v=>{v=+v||0;const a=Math.abs(v);return a>=1e9?"Rp"+(v/1e9).toFixed(2).replace(".",",")+" M":a>=1e6?"Rp"+(v/1e6).toFixed(1).replace(".",",")+" jt":"Rp"+nf.format(Math.round(v))};
+const pc=(v,d=2)=>(num(v)*100).toFixed(d).replace(".",",")+"%";
+const dc=(v,d=1)=>num(v).toFixed(d).replace(".",",");
+// kolom sheet Report (indeks 0)
+const C={sup:2,ful:3,ssl:4,nS:5,inv:9,wst:10,wr:11,nW:12,rt:14,otd:15,cpk:16,fl:17,veh:18,ar:19,cD:20,c3:21,ship:22,sal:23,dr:24,nL:25,
+ op:28,cl:29,dio:31,cgd:32,cogs:33,slow:35,dead:36,avg:38,itr:39,nI:40,cs:44,sel:46};
+function buildRep(R){const o={};MONTHS.forEach(m=>{const r=R.find(x=>x[0]===m.n);if(r)o[m.n]=r});return o}
+function buildWk(G){const m=new Map();
+ G.forEach(r=>{if(r[3]!=="Transfer Request")return;const d=pd(r[1]);if(!d)return;
+  const w=Math.min(4,Math.ceil(+d.slice(8,10)/7)),ym=d.slice(0,7),k=ym+"|"+w;let o=m.get(k);
+  if(!o){o={ym,w,s:0,f:0};m.set(k,o)}o.s+=num(r[13]);o.f+=num(r[10])*num(r[12])});
+ return [...m.values()].filter(o=>MONTHS.some(x=>x.ym===o.ym)).sort((a,b)=>(a.ym+a.w)<(b.ym+b.w)?-1:1)}
+let D={"rep": {"September": ["September", 2026, 1484792203, 1456175165, 0.9807265705, "Dari Januari ke September, SSL turun sekitar 1,67 poin persentase. Dalam periode yang sama, Supply Order naik 61,72%, sedangkan Fulfilled Order naik 59,02%. Ini menunjukkan pertumbuhan nilai pemenuhan belum menyamai pertumbuhan nilai permintaan.\n1. Gap pemenuhan semakin besar. Nilai yang belum terpenuhi meningkat dari Rp2,38 juta pada Januari menjadi Rp28,62 juta pada September. Artinya, walaupun SSL tetap mendekati 98%, nilai absolut kebutuhan yang tidak terpenuhi semakin besar.\n2. Kenaikan permintaan membutuhkan kesiapan stok yang lebih baik. Supply Order September sebesar Rp1,48 miliar, tertinggi dalam periode yang diberikan. Perencanaan stok perlu mengikuti perubahan kebutuhan aktual seluruh area.", null, "September", 2026, 5569857619, 157193322.8, 0.02822214383, "Kenaikan waste September perlu menjadi prioritas evaluasi operasional, khususnya pada pengendalian stok buah segar, akurasi forecast, rotasi stok, dan kesesuaian kuantitas pemesanan dengan realisasi penjualan.\nStrawberry memiliki nilai detail tertinggi, sekitar Rp36,30 juta. Sebagai produk buah segar yang umumnya sensitif terhadap suhu, kelembapan, dan lama penyimpanan, produk ini perlu diperiksa dari sisi umur simpan, kualitas saat penerimaan, rotasi stok, dan akurasi forecast.\nNilai detail alpukat mencapai sekitar Rp26,09 juta. Pemeriksaan perlu difokuskan pada kesesuaian tingkat kematangan saat penerimaan, kecepatan perputaran stok, dan jadwal pemesanan terhadap pola penjualan.", "Sep", 153, 0.8366013072, null, 0, "Van Standart", 167, 18192760, 1902000, 20094760, 10583466399, 0.001898693608, null, null, "Sep", 2446961937, 2450672785, 22.11360982, 22.11360982, 110738019.8, 3322140593, 3008575360, null, null, 178964357.6, 2448817361, 1.356630611, null, 10583466399, 0.1057735112, 0.284271263, 0.3138991015, 313565232.5, 0.02962783843, null, null], "Oktober": ["Oktober", 2026, 1538350734, 1511183711, 0.9823401632, "Peningkatan SSL tidak terlalu signifikan terkendala pada pemenuhan SKU Bluberry, Selai Glaze Rasa Susu, Bubuk Yoghurt, dan Vanilla dikarenakan permintaan dari Operasional cukup tinggi sedangkan pemenuhan dari Tim SCM terkendala dari Supplier yang belum bisa memenuhi forecast dari MOI Grup sendiri terutama keterbatasan supply dari beberapa area juga meningkatkan biaya logistik. Beberapa SKU juga terpotong oleh ERO akibat peningkatan Sales di bulan sebelumnya sehingga pemenuhan di bulan Oktober hanya mengalami sedikit peningkatan.", null, "Oktober", 2026, 5476257843, 178338145, 0.03256569543, null, "Okt", 147, 0.8979591837, null, 0, "Van Standart", 45, 17876250, 1377000, 19253250, 8005675600, 0.002404950058, null, null, "Okt", 2450672785, 2393362066, 34.31076536, 34.31076536, 70590597.44, 2188308521, 2002231416, null, null, 157193322.8, 2422017425, 0.9035065139, null, 8005675600, -0.2435677217, 0.2501014925, 0.2733446407, 186077104.9, 0.02324314826, "#DIV/0!", null]}, "wk": [{"ym": "2026-09", "w": 1, "s": 624943373.51, "f": 618418170.25}, {"ym": "2026-09", "w": 2, "s": 552142570.95, "f": 541561604.09}, {"ym": "2026-09", "w": 3, "s": 162952911.0, "f": 158784378.13}, {"ym": "2026-09", "w": 4, "s": 144028966.67, "f": 141002726.28}, {"ym": "2026-10", "w": 1, "s": 1036675253.7, "f": 1017933974.16}, {"ym": "2026-10", "w": 2, "s": 248723491.02, "f": 245210164.88}, {"ym": "2026-10", "w": 3, "s": 135531337.31, "f": 134479053.03}, {"ym": "2026-10", "w": 4, "s": 112952333.09, "f": 109625427.35}]},charts={};
+const g=(m,k)=>{const r=D.rep[m.n];return r?r[C[k]]:null};
+function mk(id,cfg){if(charts[id])charts[id].destroy();Chart.defaults.font.size=13;Chart.defaults.color=getComputedStyle(document.body).color;
+ cfg.options=Object.assign({responsive:true,maintainAspectRatio:false,plugins:{legend:{position:"bottom"}}},cfg.options);charts[id]=new Chart($("#"+id),cfg)}
+const lb=MONTHS.map(m=>m.n),col=["#2f9e63","#e8913a","#3b7dd8","#d9534f"];
+const ser=(l,k,c,x)=>Object.assign({label:l,data:MONTHS.map(m=>num(g(m,k))),backgroundColor:c,borderColor:c},x||{});
+const ytick=f=>({ticks:{callback:f}});
+function notes(id,k){$(id).innerHTML=MONTHS.map(m=>{const t=g(m,k);const ok=typeof t=="string"&&t.trim()&&!t.startsWith("#");
+ return ok?`<div class="n"><b>Keterangan ${m.n}</b>${t.replace(/</g,"&lt;")}</div>`:`<div class="n e"><b>Keterangan ${m.n}</b>Belum ada keterangan di sheet Report.</div>`}).join("")}
+function render(){
+ const [a,b]=MONTHS,dl=(k,f)=>{const x=num(g(b,k))-num(g(a,k));return `<span class="${x>=0?"up":"dn"}">${x>=0?"▲":"▼"} ${f(Math.abs(x))} vs ${a.s}</span>`};
+ $("#kpis").innerHTML=[["SSL "+b.n,pc(g(b,"ssl")),dl("ssl",v=>dc(v*100)+" poin")],["Waste Rate "+b.n,pc(g(b,"wr")),dl("wr",v=>dc(v*100)+" poin")],
+  ["On-Time Delivery "+b.n,pc(g(b,"otd"),1),dl("otd",v=>dc(v*100)+" poin")],["DIO "+b.n,dc(g(b,"dio"))+" hari",dl("dio",v=>dc(v)+" hari")]].map(x=>`<div class="k"><small>${x[0]}</small><b>${x[1]}</b>${x[2]}</div>`).join("");
+ const W=D.wk,ws=W.map(o=>num(o.s)?o.f/o.s:0),mn=Math.min(...ws);
+ mk("c1",{type:"line",data:{labels:W.map(o=>"Mgg "+o.w+" "+MONTHS.find(m=>m.ym===o.ym).s),datasets:[{label:"SSL mingguan",data:ws,borderColor:col[0],backgroundColor:col[0],tension:.25,pointRadius:5}]},
+  options:{scales:{y:{min:Math.floor((mn-.005)*200)/200,max:1,...ytick(v=>pc(v,1))}},plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>"SSL "+pc(c.raw)+" · Order "+rp(W[c.dataIndex].s)}}}}});
+ mk("c2",{type:"bar",data:{labels:lb,datasets:[ser("SSL","ssl",col[0])]},options:{scales:{y:{min:.95,max:1,...ytick(v=>pc(v,1))}},plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>pc(c.raw)}}}}});
+ mk("c3",{type:"bar",data:{labels:lb,datasets:[ser("Supply Order","sup",col[2]),ser("Fulfilled Order","ful",col[0])]},options:{scales:{y:ytick(v=>rp(v))},plugins:{tooltip:{callbacks:{label:c=>c.dataset.label+": "+rp(c.raw)}}}}});
+ notes("#n1","nS");
+ mk("c4",{type:"bar",data:{labels:lb,datasets:[ser("Stok awal","op",col[2]),ser("Stok akhir","cl",col[0]),ser("Rata-rata","avg",col[1])]},options:{scales:{y:ytick(v=>rp(v))},plugins:{tooltip:{callbacks:{label:c=>c.dataset.label+": "+rp(c.raw)}}}}});
+ mk("c5",{type:"bar",data:{labels:lb,datasets:[ser("DIO (hari)","dio",col[1]),ser("ITR (x)","itr",col[2])]}});
+ $("#t1").innerHTML="<tr><th></th>"+MONTHS.map(m=>`<th>${m.s}</th>`).join("")+"</tr>"+[["COGS","cogs",rp],["COGS / hari","cgd",rp],["Sales","sal",rp],["Selisih bahan baku","sel",rp],["Persentase selisih","cs",v=>pc(v)],["Slow moving SKU","slow",v=>nf.format(v)],["Dead stock","dead",rp]].map(x=>`<tr><td>${x[0]}</td>`+MONTHS.map(m=>`<td>${x[2](num(g(m,x[1])))}</td>`).join("")+"</tr>").join("");
+ notes("#n2","nI");
+ mk("c6",{type:"bar",data:{labels:lb,datasets:[ser("Waste Rate","wr",col[3])]},options:{scales:{y:{beginAtZero:true,...ytick(v=>pc(v,1))}},plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>pc(c.raw)}}}}});
+ mk("c7",{type:"bar",data:{labels:lb,datasets:[ser("Total inventory","inv",col[2]),ser("Total waste","wst",col[3])]},options:{scales:{y:ytick(v=>rp(v))},plugins:{tooltip:{callbacks:{label:c=>c.dataset.label+": "+rp(c.raw)}}}}});
+ notes("#n3","nW");
+ mk("c8",{type:"bar",data:{labels:lb,datasets:[ser("On-Time Delivery","otd",col[0]),ser("Failed Delivery","fl",col[3])]},options:{scales:{y:{beginAtZero:true,max:1,...ytick(v=>pc(v,0))}},plugins:{tooltip:{callbacks:{label:c=>c.dataset.label+": "+pc(c.raw,1)}}}}});
+ mk("c9",{type:"bar",data:{labels:lb,datasets:[ser("Deliveree","cD",col[2],{stack:"s"}),ser("3PL (selain Deliveree)","c3",col[1],{stack:"s"})]},options:{scales:{x:{stacked:true},y:{stacked:true,...ytick(v=>rp(v))}},plugins:{tooltip:{callbacks:{label:c=>c.dataset.label+": "+rp(c.raw)}}}}});
+ $("#t2").innerHTML="<tr><th></th>"+MONTHS.map(m=>`<th>${m.s}</th>`).join("")+"</tr>"+[["Route",v=>nf.format(v),"rt"],["Cost per KG",v=>"Rp"+nf.format(v),"cpk"],["Total area",v=>nf.format(v),"ar"],["Total shipping cost",rp,"ship"],["Gross sales",rp,"sal"],["Deliveree ratio",v=>pc(v,3),"dr"]].map(x=>`<tr><td>${x[0]}</td>`+MONTHS.map(m=>`<td>${x[1](num(g(m,x[2])))}</td>`).join("")+"</tr>").join("")
+  +`<tr><td>Kendaraan</td>`+MONTHS.map(m=>`<td>${g(m,"veh")||"-"}</td>`).join("")+"</tr>";
+ notes("#n4","nL")}
+async function gv(name){
+ const r=await fetch(`https://docs.google.com/spreadsheets/d/${SID}/gviz/tq?tqx=out:json&headers=0&sheet=${encodeURIComponent(name)}`,{cache:"no-store"});
+ if(!r.ok)throw new Error("tab "+name+": HTTP "+r.status);
+ const t=await r.text(),m=t.match(/setResponse\(([\s\S]*)\);?\s*$/);
+ if(!m)throw new Error("tab "+name+": respons bukan data (pastikan spreadsheet dibagikan Siapa saja yang memiliki link)");
+ const j=JSON.parse(m[1]);if(j.status!=="ok")throw new Error("tab "+name+": "+((j.errors&&j.errors[0]&&j.errors[0].message)||"error"));
+ return j.table.rows.map(x=>(x.c||[]).map(c=>c?c.v:null))}
+function applyData(nd){D=nd;$("#src").textContent="Sumber: Google Sheets · sheet Report & GD · periode September–Oktober 2026";render()}
+let liveOk=false,busy=false;
+async function live(){
+ if(busy)return;busy=true;const b=$("#rf"),el=$("#live");b.disabled=true;el.style.color="";el.textContent="Mengambil data dari Google Sheets…";
+ try{const [R,G]=await Promise.all(["Report","GD"].map(gv));
+  const nd={rep:buildRep(R),wk:buildWk(G)};if(!Object.keys(nd.rep).length||!nd.wk.length)throw new Error("tidak ada baris data yang terbaca");
+  applyData(nd);liveOk=true;
+  el.textContent="Live dari Google Sheets, diperbarui "+new Date().toLocaleTimeString("id-ID",{hour:"2-digit",minute:"2-digit"})+" ("+nf.format(G.length)+" baris GD). Otomatis tiap "+REFRESH_MIN+" menit."}
+ catch(e){el.style.color="#ffd36b";el.textContent="Gagal memuat dari Google Sheets ("+e.message+"). Menampilkan "+(liveOk?"data terakhir yang berhasil dimuat":"snapshot")+"."}
+ b.disabled=false;busy=false}
+$("#rf").onclick=live;
+$("#src").textContent="Snapshot data Sep–Okt 2026";render();
+setInterval(live,REFRESH_MIN*60000);
+live();
+</script></body></html>
