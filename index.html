@@ -30,9 +30,11 @@ ul{margin:4px 0 0 18px;padding:0}
 <div class="bar">
 <label>Periode<select id="g"><option value="D">Harian</option><option value="W">Mingguan</option><option value="M" selected>Bulanan</option></select></label>
 <label>Pilih tanggal / minggu<select id="pick"></select></label>
-<label>Tampilkan per<select id="dim"><option value="b">Branch</option><option value="p">SKU / Product</option></select></label>
+<label>Tampilkan per<select id="dim"><option value="b">Branch</option><option value="p">SKU / Product</option><option value="a">AM</option></select></label>
+<label>Filter AM<select id="am"></select></label>
 <label>Filter Branch<select id="br"></select></label>
 <label>Filter Product<select id="pr"></select></label>
+<label>Kategori<select id="cat"></select></label>
 <label>Satuan<select id="mode"><option value="v">Value (Rp)</option><option value="q">Qty</option></select></label>
 </div>
 <div id="ld" class="c" style="margin:12px 20px;display:none"></div><div class="tabs" id="tabs"><button data-t="sup" class="on">Supply Service Level</button><button data-t="wst">Waste Rate</button><button data-t="log">Logistic Distribution</button><button data-t="inv">Inventory Health</button></div>
@@ -42,17 +44,23 @@ ul{margin:4px 0 0 18px;padding:0}
 <script>
 let D;
 const SID='1pymfdzjA95Ec81-rGW-C8gypi-UWQsN7wz-mA2Yl3F4',BASE=Date.UTC(2026,8,1)/864e5,MNm=['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
-const gv=async n=>{const r=await fetch(`https://docs.google.com/spreadsheets/d/${SID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(n)}`);if(!r.ok)throw new Error(`${n}: HTTP ${r.status}`);const t=await r.text(),m=t.match(/setResponse\(([\s\S]*)\);?\s*$/);if(!m)throw new Error(`${n}: respons bukan data (cek izin berbagi sheet)`);const j=JSON.parse(m[1]);if(j.status==='error')throw new Error(`${n}: ${(j.errors||[{}])[0].message||'error'}`);return j.table.rows.map(r=>(r.c||[]).map(c=>c?c.v:null))};
+const gv=async(n,tq)=>{const r=await fetch(`https://docs.google.com/spreadsheets/d/${SID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(n)}${tq?'&tq='+encodeURIComponent(tq):''}`);if(!r.ok)throw new Error(`${n}: HTTP ${r.status}`);const t=await r.text(),m=t.match(/setResponse\(([\s\S]*)\);?\s*$/);if(!m)throw new Error(`${n}: respons bukan data (cek izin berbagi sheet)`);const j=JSON.parse(m[1]);if(j.status==='error')throw new Error(`${n}: ${(j.errors||[{}])[0].message||'error'}`);return j.table.rows.map(r=>(r.c||[]).map(c=>c?c.v:null))};
 const pdt=v=>{if(typeof v!=='string')return null;const m=v.match(/^Date\((\d+),(\d+),(\d+)/);return m?Date.UTC(+m[1],+m[2],+m[3])/864e5:null};
 const num=v=>typeof v==='number'?v:(parseFloat(v)||0);
+const nc=s=>{const u=String(s||'').trim().toUpperCase();return u.startsWith('BAHAN')?'Bahan':u.startsWith('KEMASAN')?'Kemasan':/^(PELENGKAP|PERLENGKAPAN|ALAT)/.test(u)?'Pelengkap':u==='BUAH'?'Buah':u==='WIP'?'WIP':null};
+const CATS=['Bahan','Kemasan','Pelengkap','Buah','WIP','Lainnya'];
+function fac(p,su,so){if(!so||so===su)return 1;const m=p.match(/\(([\d.,]+)\s*(GR|KG|ML|L|PCS)?\)/),pk=m?parseFloat(m[1].replace(',','.')):null;
+if(su==='GR'&&so==='KG')return .001;if(su==='GR'&&pk&&m[2]==='GR')return 1/pk;if(su==='GR'&&pk&&m[2]==='KG')return 1/(pk*1000);if(su==='PCS'&&pk&&m[2]==='PCS')return 1/pk;return 1}
 async function loadData(){
-const names=['GD','GTR','GR','STF','CP','Waste','SO Awal','SO Akhir','LOG-DL','LOG-ET','DT','COGS'];
-let X;try{X=Object.fromEntries(await Promise.all(names.map(async n=>[n,await gv(n)])))}catch(e){
+const names=['GD','GTR','GR','STF','CP','Waste','SO Awal','SO Akhir','LOG-DL','LOG-ET','DT','COGS','Master'];
+const sq=(a,b)=>gv('SMU',`select A,B,C,D,E,F,G where A >= date '${a}' and A <= date '${b}'`);
+let X,warn='';try{const sm=Promise.all([sq('2026-09-01','2026-09-30'),sq('2026-10-01','2026-10-31')]).then(a=>a.flat()).catch(e=>{warn=' ⚠ SMU gagal dimuat: '+e.message;return[]});
+X=Object.fromEntries(await Promise.all(names.map(async n=>[n,await gv(n)])));X['SMU']=await sm}catch(e){
  try{const r=await fetch('data.json');if(!r.ok)throw 0;return{d:await r.json(),msg:'⚠ Mode snapshot (data.json) — gagal terhubung ke Google Sheets: '+e.message}}catch(_){throw e}}
 const B=new Map,P=new Map,id=(M,k)=>{let i=M.get(k);if(i==null){i=M.size;M.set(k,i)}return i};
 const T=(rows,c,dx,f,vf)=>{const m=new Map;for(const r of rows){if(f&&!f(r))continue;const d=pdt(r[c.d]);if(d==null)continue;const di=dx(d-BASE);if(di==null)continue;const b=id(B,String(r[c.b]).trim()),p=id(P,String(r[c.p]).trim()),k=di*1e6+b*1e3+p;let a=m.get(k);if(!a){a=[di,b,p,0,0];m.set(k,a)}a[3]+=num(r[c.q]);a[4]+=vf?vf(r):num(r[c.v])}return[...m.values()].map(a=>[a[0],a[1],a[2],Math.round(a[3]*1e3)/1e3,Math.round(a[4])])};
 const dd=x=>x>=0&&x<=60?x:null,so=mp=>x=>mp[x]??null;
-const gd=(c)=>({d:1,b:5,p:7,q:9,v:13}),cg={d:1,b:5,p:8,q:10,v:14},co=(b)=>({d:1,b,p:8,q:10,v:14});
+const cg={d:1,b:5,p:8,q:10,v:14},co=b=>({d:1,b,p:8,q:10,v:14});
 const GDr=X['GD'].filter(r=>r[3]==='Transfer Request'&&String(r[4]).startsWith('Warehouse')),GRr=X['GR'].filter(r=>r[3]==='Goods Delivery');
 const d={};
 d.GD=T(GDr,{d:1,b:5,p:7,q:9,v:13},dd);d.GR=T(GRr,cg,dd);d.GRa=T(X['GR'],cg,dd);
@@ -61,23 +69,34 @@ d.CP=T(X['CP'],{d:1,b:3,p:6,q:14,v:15},dd);
 d.W=T(X['Waste'],{d:1,b:2,p:7,q:9},dd,null,r=>num(r[9])*num(r[10]));
 const sc={d:1,b:2,p:3,q:7},sv=r=>num(r[7])*num(r[9]);
 d.SOa=T(X['SO Awal'],sc,so({'-1':0,29:1}),null,sv);d.SOe=T(X['SO Akhir'],sc,so({29:0,60:1}),null,sv);
+// satuan dasar produk & SMU (dikonversi ke satuan SO)
+const un=new Map;for(const[S2,pi,ui]of[['SO Awal',3,5],['SO Akhir',3,5],['GR',8,9],['Waste',7,8]])for(const r of X[S2]){const p=String(r[pi]||'').trim();if(p&&r[ui]&&!un.has(p))un.set(p,r[ui])}
+const fc=new Map,fk=(p,u)=>{const k=p+'|'+u;let f=fc.get(k);if(f==null){f=fac(p,u,un.get(p));fc.set(k,f)}return f};
+d.SMU=T(X['SMU'].map(r=>{const p=String(r[2]||'').trim();return[r[0],r[1],p,num(r[5])*fk(p,r[4]),num(r[6])]}),{d:0,b:1,p:2,q:3,v:4},dd);
+// GTR
 const gk=new Map,gp=new Map,ad=(M,k,q,v)=>{const a=M.get(k)||[0,0];a[0]+=q;a[1]+=v;M.set(k,a)};
 for(const r of X['GD']){ad(gk,r[2]+'|'+r[7],num(r[9]),num(r[13]));ad(gp,r[7],num(r[9]),num(r[13]))}
 const sn=new Set,GT=[];for(const r of X['GTR']){if(!String(r[2]).startsWith('Warehouse'))continue;const k=r[0]+'|'+r[4];if(sn.has(k))continue;sn.add(k);const a=gk.get(k),p=gp.get(r[4]),u=a&&a[0]>0?a[1]/a[0]:p&&p[0]>0?p[1]/p[0]:0,q=num(r[6]);GT.push([r[1],r[3],r[4],q,q*u])}
 d.GTR=T(GT,{d:0,b:1,p:2,q:3,v:4},dd);
-d.B=[...B.keys()];d.P=[...P.keys()];
+// kategori produk & AM (dari sheet Master)
+const pcat=new Map;for(const[rows,pi,ci]of[[X['SMU'],2,3],[X['CP'],6,5],[X['SO Awal'],3,4],[X['GR'],8,7],[X['GD'],7,6]])for(const r of rows){const p=String(r[pi]||'').trim(),k=nc(r[ci]);if(k&&p&&!pcat.has(p))pcat.set(p,k)}
+d.B=[...B.keys()];d.P=[...P.keys()];d.CAT=CATS;d.PC=d.P.map(p=>CATS.indexOf(pcat.get(p)||'Lainnya'));
+const am=new Map;for(const r of X['Master']){const b=String(r[0]||'').trim(),a=String(r[2]||'').trim();if(b&&a&&b!=='Branch'&&a!=='AM')am.set(b,a)}
+d.AM=[...new Set(am.values())].sort().concat('Tanpa AM');d.BA=d.B.map(b=>am.has(b)?d.AM.indexOf(am.get(b)):d.AM.length-1);
 d.COGS=X['COGS'].filter(r=>r[0]==='September'||r[0]==='Oktober').map(r=>[r[0]==='September'?0:1,String(r[1]).trim(),num(r[2]),num(r[8]),num(r[11])]);
 const veh=v=>{const s=String(v).toLowerCase();return s.includes('van')?'Van':s.includes('engkel')?'Engkel Box':s.includes('pickup')?'Small Pickup':s.includes('box')?'Small Box':s.includes('xl')?'Car XL':'Car'};
 const st=new Map;for(const r of X['DT']){const k=String(r[0]);if(!/^\d+$/.test(k))continue;let on=0,late=0;for(let i=15;i<25;i++){const s=String(r[i]||'').trim().toLowerCase();if(s==='on time')on++;else if(s==='terlambat'||s==='late')late++}st.set(k,[on,late])}
 d.DL=[];for(const r of X['LOG-DL']){if(!/^\d+$/.test(String(r[1])))continue;const bl=String(r[3]||'').trim().toLowerCase();let m=/^sep/.test(bl)?0:/^(okt|oct)/.test(bl)?1:null;if(m==null){const t=pdt(r[4]);if(t==null)continue;const q=new Date(t*864e5);if(q.getUTCFullYear()!==2026||![8,9].includes(q.getUTCMonth()))continue;m=q.getUTCMonth()-8}const s=st.get(String(r[1]))||[0,0];d.DL.push([m,String(r[0]||'').replace(' (lama)','').trim(),veh(r[2]),num(r[11]),s[0],s[1]])}
 d.ET=[];for(const r of X['LOG-ET']){const t=pdt(r[1]);if(t==null)continue;const m=new Date(t*864e5);d.ET.push([MNm[m.getUTCMonth()]+' '+m.getUTCFullYear(),String(r[3]),num(r[4]),num(r[6])])}
-const n=new Date();return{d,msg:'Live dari Google Sheets · diperbarui '+n.toLocaleString('id-ID')}}
+const n=new Date();return{d,msg:'Live dari Google Sheets · diperbarui '+n.toLocaleString('id-ID')+warn}}
 
 const $=s=>document.querySelector(s),MN=['Sep','Okt'];
-const S={g:'M',pick:1,dim:'b',br:'',pr:'',mode:'v',tab:'sup'};
+const S={g:'M',pick:1,dim:'b',br:'',pr:'',am:'',cat:'',mode:'v',tab:'sup'};
+const FW=[0,1].map(m=>(new Date(Date.UTC(2026,8+m,1)).getUTCDay()+6)%7),WD=['Sen','Sel','Rab','Kam','Jum','Sab','Min'];
 const dom=d=>d<30?d+1:d-29,mo=d=>d<30?0:1,DIM=[30,31];
-const inP=d=>{const x=dom(d);return S.g==='M'||(S.g==='D'?x===S.pick:Math.ceil(x/7)===S.pick)};
-const flt=(b,p)=>(!S.br||b===+S.br)&&(!S.pr||p===+S.pr);
+const wpos=d=>dom(d)-1+FW[mo(d)],wd=d=>wpos(d)%7,wk=d=>Math.floor(wpos(d)/7)+1;
+const inP=d=>S.g==='M'||(S.g==='D'?dom(d)===S.pick:wk(d)===S.pick);
+let WH=[];const flt=(b,p)=>!WH[b]&&(S.br===''||b===+S.br)&&(S.pr===''||p===+S.pr)&&(S.am===''||D.BA[b]===+S.am)&&(S.cat===''||D.PC[p]===+S.cat);
 const nf=(x,d=0)=>x==null||isNaN(x)?'–':x.toLocaleString('id-ID',{maximumFractionDigits:d});
 const fv=x=>{if(x==null||isNaN(x))return'–';const a=Math.abs(x);return a>=1e9?nf(x/1e9,2)+' M':a>=1e6?nf(x/1e6,1)+' jt':nf(x)};
 const fm=x=>S.mode==='v'?fv(x):nf(x,1),pc=x=>x==null||isNaN(x)?'–':nf(x,1)+'%';
@@ -88,10 +107,15 @@ const dpp=(a,b,bad=false)=>{if(a==null||b==null||isNaN(a)||isNaN(b))return'–';
 const ix=S=>S.mode==='v'?4:3;
 function agg(T,gate,K){const r=new Map();for(const x of T){if(!gate(x)||!flt(x[1],x[2]))continue;const k=K(x);let a=r.get(k);if(!a){a=[0,0];r.set(k,a)}a[0]+=x[3];a[1]+=x[4]}return r}
 const gD=m=>x=>mo(x[0])===m&&inP(x[0]),gS=m=>x=>x[0]===m,gM=m=>x=>mo(x[0])===m;
-const K=()=>S.dim==='b'?x=>x[1]:x=>x[2],NM=()=>S.dim==='b'?D.B:D.P;
+const K=()=>S.dim==='b'?x=>x[1]:S.dim==='a'?x=>D.BA[x[1]]:x=>x[2],NM=()=>S.dim==='b'?D.B:S.dim==='a'?D.AM:D.P,DN=()=>({b:'Branch',p:'SKU / Product',a:'AM'})[S.dim];
 const ch={};function chart(id,cfg){if(ch[id])ch[id].destroy();cfg.options=Object.assign({responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}}},cfg.options||{});ch[id]=new Chart($('#'+id),cfg)}
 const col=()=>{const s=getComputedStyle(document.documentElement);return[s.getPropertyValue('--s').trim()||'#6c8ebf',s.getPropertyValue('--o').trim()||'#e8833a']};
-const per=()=>S.g==='M'?'Bulanan':S.g==='D'?`Harian · tgl ${S.pick}`:`Mingguan · minggu ${S.pick} (tgl ${S.pick*7-6}–${Math.min(S.pick*7,31)})`;
+const wrange=(m,k)=>{let a=0,b=0;for(let x=1;x<=DIM[m];x++)if(Math.floor((x-1+FW[m])/7)+1===k){if(!a)a=x;b=x}return a?`${a}–${b}`:'–'};
+const per=()=>S.g==='M'?'Bulanan':S.g==='D'?`Harian · tgl ${S.pick}`:`Mingguan · Minggu ${S.pick} (Sep tgl ${wrange(0,S.pick)} | Okt tgl ${wrange(1,S.pick)}) · tren Senin–Minggu`;
+function trend(tabs){const W=S.g==='W',L=W?7:31,q=S.mode==='v'?4:3,o=[0,1].map(()=>Array.from({length:L},()=>tabs.map(()=>0))),h=[0,1].map(()=>Array(L).fill(false));
+tabs.forEach((T,j)=>{for(const x of T){if(!flt(x[1],x[2]))continue;const d=x[0],m=mo(d);if(W&&wk(d)!==S.pick)continue;const s=W?wd(d):dom(d)-1;o[m][s][j]+=x[q];h[m][s]=true}});
+return{lb:W?WD:Array.from({length:L},(_,i)=>i+1),o,h,W}}
+const CC={t:'#7f6fd6',d:'#3d8bd9',r:'#2ea36b',s:'#e8833a',c:'#c9a227'};
 const kpi=(l,a,b,f,bad)=>`<div class="c k"><span class="mu">${l}</span><b>${f(b)}</b><div class="r"><span class="S">Sep: ${f(a)}</span>${dlt(a,b,bad)}</div></div>`;
 const table=(h,rows)=>`<div class="sc"><table><thead><tr>${h.map(x=>`<th>${x}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
 const sum=(m,i)=>{let s=0;m.forEach(a=>s+=a[i]);return s};
@@ -99,56 +123,64 @@ const tp=(arr,n)=>arr.slice(0,n);
 
 function supply(){
 const k=K(),N=NM(),q=S.mode==='v'?1:0,fx=S.mode==='v'?fv:x=>nf(x,1),U=S.mode==='v'?'Value (Rp)':'Qty';
-const R=[0,1].map(m=>({t:agg(D.GTR,gD(m),k),d:agg(D.GD,gD(m),k),r:agg(D.GR,gD(m),k)}));
-const keys=[...new Set(R.flatMap(o=>[...o.t.keys(),...o.d.keys(),...o.r.keys()]))];
-const g=(m,x)=>{const t=(R[m].t.get(x)||[0,0])[q],d=(R[m].d.get(x)||[0,0])[q],r=(R[m].r.get(x)||[0,0])[q];return{t,d,r,ssl:t?r/t*100:null,av:t?d/t*100:null}};
-const rows=keys.map(x=>({x,a:g(0,x),b:g(1,x)})).sort((u,v)=>v.b.t-u.b.t);
-const T=m=>{const t=sum(R[m].t,q),d=sum(R[m].d,q),r=sum(R[m].r,q);return{t,d,r,ssl:t?r/t*100:null,av:t?d/t*100:null}},t0=T(0),t1=T(1);
-const sp=(c,n)=>[`<span class=${c}>${n} GTR</span>`,`<span class=${c}>${n} GD</span>`,`<span class=${c}>${n} GR</span>`,`<span class=${c}>${n} SSL</span>`,`<span class=${c}>${n} GD/GTR</span>`];
-$('#sup').innerHTML=`<p class="note">Periode: <b>${per()}</b> · Satuan: <b>${U}</b>. Alur: Outlet membuat <b>GTR</b> (request) → Warehouse mengirim stok yang tersedia lewat <b>GD</b> → Outlet menerima <b>GR</b>. <b>SSL</b> = GR ÷ GTR (porsi request yang terpenuhi); <b>GD/GTR</b> = ketersediaan stok gudang. Value GTR memakai harga dari GD (referensi Transfer Number; bila belum ada GD, memakai harga rata-rata GD produk tsb).</p>
-<div class="g">${kpi('Request (GTR)',t0.t,t1.t,fx)}${kpi('Supply Order (GD)',t0.d,t1.d,fx)}${kpi('Fulfill Order (GR)',t0.r,t1.r,fx)}${kpi('Supply Service Level (GR/GTR)',t0.ssl,t1.ssl,pc)}${kpi('Ketersediaan Gudang (GD/GTR)',t0.av,t1.av,pc)}</div>
-<div class="g2"><div class="c"><h2>SSL — ${S.dim==='b'?'Top 12 Branch':'Top 12 SKU'} (by GTR Okt)</h2><div class="cv"><canvas id="c1"></canvas></div></div>
-<div class="c"><h2>Tren harian SSL (tgl 1–31)</h2><div class="cv"><canvas id="c2"></canvas></div></div>
-<div class="c"><h2>GTR vs GD vs GR (${U})</h2><div class="cv"><canvas id="c3"></canvas></div></div></div>
-<div class="c"><h2>Tabel detail per ${S.dim==='b'?'Branch':'SKU'} (${U})</h2>${table([S.dim==='b'?'Branch':'SKU',...sp('S','Sep'),...sp('O','Okt'),'Δ SSL','Δ GTR'],rows.map(({x,a,b})=>`<tr><td>${N[x]}</td><td>${fx(a.t)}</td><td>${fx(a.d)}</td><td>${fx(a.r)}</td><td>${pc(a.ssl)}</td><td>${pc(a.av)}</td><td>${fx(b.t)}</td><td>${fx(b.d)}</td><td>${fx(b.r)}</td><td>${pc(b.ssl)}</td><td>${pc(b.av)}</td><td>${dpp(a.ssl,b.ssl)}</td><td>${dlt(a.t,b.t)}</td></tr>`))}</div>`;
-const [cs,co]=col(),t12=tp(rows,12);
-chart('c1',{type:'bar',data:{labels:t12.map(r=>N[r.x]),datasets:[{label:'Sep',data:t12.map(r=>r.a.ssl),backgroundColor:cs},{label:'Okt',data:t12.map(r=>r.b.ssl),backgroundColor:co}]},options:{scales:{y:{title:{display:true,text:'SSL %'}}}}});
-const dd=[0,1].map(()=>Array.from({length:31},()=>[0,0]));
-for(const[T2,i]of[[D.GTR,0],[D.GR,1]])for(const x of T2){if(!flt(x[1],x[2]))continue;dd[mo(x[0])][dom(x[0])-1][i]+=x[ix(S)]}
-chart('c2',{type:'line',data:{labels:Array.from({length:31},(_,i)=>i+1),datasets:[0,1].map(m=>({label:MN[m],borderColor:[cs,co][m],tension:.25,data:dd[m].map(a=>a[0]?a[1]/a[0]*100:null)}))}});
-chart('c3',{type:'bar',data:{labels:['GTR','GD','GR'],datasets:[0,1].map(m=>{const z=m?t1:t0;return{label:MN[m],backgroundColor:[cs,co][m],data:[z.t,z.d,z.r]}})}});
-}
-function wasteCalc(K2,gate){ // gate(m)->{tbl:gate}
-const T={GRa:0,CP:1,STFo:2,STFi:3,W:4},res=new Map(),get=(k,m)=>{let r=res.get(k);if(!r){r=[0,1].map(()=>Array.from({length:6},()=>[0,0]));res.set(k,r)}return r[m]};
-for(const m of[0,1]){for(const t in T)for(const x of D[t]){if(!gate.d(m)(x)||!flt(x[1],x[2]))continue;const a=get(K2(x),m)[T[t]];a[0]+=x[3];a[1]+=x[4]}
-for(const x of D.SOa){if(x[0]!==m||!flt(x[1],x[2]))continue;const a=get(K2(x),m)[5];a[0]+=x[3];a[1]+=x[4]}}
-return res}
-function wasteRows(K2){const res=wasteCalc(K2,{d:gD}),i=ix(S),M=S.g==='M';
-return[...res].map(([k,r])=>({k,m:r.map(z=>{const[gr,cp,so,si,w,s0]=z;const av=(M?s0[1]:0)+gr[1]+cp[1]+si[1]-so[1];return{z,av,rate:av>0?w[1]/av*100:null}})}))}
-function waste(){
-const k=K(),N=NM(),M=S.g==='M',i=ix(S),rows=wasteRows(k).sort((a,b)=>b.m[1].z[4][1]-a.m[1].z[4][1]);
-const tot=m=>{const s=rows.reduce((a,r)=>{r.m[m].z.forEach((z,j)=>{a[j][0]+=z[0];a[j][1]+=z[1]});return a},Array.from({length:6},()=>[0,0]));const av=(M?s[5][1]:0)+s[0][1]+s[1][1]+s[3][1]-s[2][1];return{s,av,rate:av>0?s[4][1]/av*100:null}};
-const t0=tot(0),t1=tot(1),hd=(c,l)=>`<span class="${c}">${l}</span>`;
-const cell=(z,j)=>fm(z[j][i-3])+'';
-const wk=m=>(z,j)=>fm(z[j][S.mode==='v'?1:0]);
-const hdr=[S.dim==='b'?'Branch':'Product'];for(const[c,n]of[['S','Sep'],['O','Okt']]){if(M)hdr.push(hd(c,n+' SO Awal'));hdr.push(hd(c,n+' GR'),hd(c,n+' CP'),hd(c,n+' STF Krm'),hd(c,n+' STF Trm'),hd(c,n+' Waste Qty'),hd(c,n+' Waste Val'),hd(c,n+' Rate'))}hdr.push('Δ Rate','Δ Waste Val');
-const f=S.mode==='v'?1:0,body=rows.map(r=>{let h=`<td>${N[r.k]}</td>`;for(const m of[0,1]){const z=r.m[m].z;if(M)h+=`<td>${fm(z[5][f])}</td>`;h+=`<td>${fm(z[0][f])}</td><td>${fm(z[1][f])}</td><td>${fm(z[2][f])}</td><td>${fm(z[3][f])}</td><td>${nf(z[4][0],1)}</td><td>${fv(z[4][1])}</td><td>${pc(r.m[m].rate)}</td>`}return`<tr>${h}<td>${dpp(r.m[0].rate,r.m[1].rate,true)}</td><td>${dlt(r.m[0].z[4][1],r.m[1].z[4][1],true)}</td></tr>`});
-const byP=wasteRows(x=>x[2]).sort((a,b)=>b.m[1].z[4][1]-a.m[1].z[4][1]),byB=wasteRows(x=>x[1]).sort((a,b)=>b.m[1].z[4][1]-a.m[1].z[4][1]);
-const hi=byB.filter(r=>r.m[1].av>1e6&&r.m[1].rate!=null).sort((a,b)=>b.m[1].rate-a.m[1].rate)[0];
-const share=(arr,n)=>tp(arr,3).map(r=>`${n[r.k]} (${fv(r.m[1].z[4][1])})`).join(', ');
-const gp=chg(t0.s[4][1],t1.s[4][1]),gs=(a=>a.map(r=>r.m[1].z[4][1]).slice(0,3).reduce((x,y)=>x+y,0))(byP);
-$('#wst').innerHTML=`<p class="note">Periode: <b>${per()}</b> · Available Stock = ${M?'SO Awal (akhir bulan sebelumnya) + ':''}GR + CP + STF Menerima − STF Mengirim. Waste Rate = Nilai Waste ÷ Available Stock (Value). ${M?'':'Untuk harian/mingguan SO tidak diikutkan.'}</p>
-<div class="g">${kpi('Waste (Value)',t0.s[4][1],t1.s[4][1],fv,true)}${kpi('Waste (Qty)',t0.s[4][0],t1.s[4][0],x=>nf(x,0),true)}${kpi('Waste Rate',t0.rate,t1.rate,pc,true)}${kpi('Available Stock (Value)',t0.av,t1.av,fv)}</div>
-<div class="c"><h2>Analisa Waste</h2><ul><li>Nilai waste ${gp==null?'–':gp>0?'naik':'turun'} <b>${gp==null?'–':nf(Math.abs(gp),1)+'%'}</b> dari Sep (${fv(t0.s[4][1])}) ke Okt (${fv(t1.s[4][1])}); waste rate ${pc(t0.rate)} → ${pc(t1.rate)}.</li>
-<li>Kontributor waste Okt terbesar (Product): ${share(byP,D.P)} — 3 teratas = <b>${t1.s[4][1]?nf(gs/t1.s[4][1]*100,1)+'%':'–'}</b> dari total.</li>
-<li>Branch dengan waste terbesar Okt: ${share(byB,D.B)}.</li>${hi?`<li>Waste rate tertinggi Okt (available &gt; Rp 1 jt): <b>${D.B[hi.k]}</b> ${pc(hi.m[1].rate)}.</li>`:''}</ul></div>
-<div class="g2"><div class="c"><h2>Waste Value — Top 12 ${S.dim==='b'?'Branch':'Product'}</h2><div class="cv"><canvas id="w1"></canvas></div></div>
-<div class="c"><h2>Komponen stok: GR, CP, STF Krm, STF Trm, Waste (${S.mode==='v'?'Value':'Qty'})</h2><div class="cv"><canvas id="w2"></canvas></div></div></div>
-<div class="c"><h2>Detail Waste Rate per ${S.dim==='b'?'Branch':'Product'}</h2>${table(hdr,body)}</div>`;
+const TB={t:D.GTR,d:D.GD,r:D.GR,s:D.SMU,c:D.CP},ks=Object.keys(TB),LB={t:'GTR',d:'GD',r:'GR',s:'SMU',c:'CP'};
+const mk=v=>{const[t,d,r,s,c]=v;return{t,d,r,s,c,ssl:t?r/t*100:null,av:t?d/t*100:null}};
+const R=[0,1].map(m=>Object.fromEntries(ks.map(j=>[j,agg(TB[j],gD(m),k)])));
+const keys=[...new Set(R.flatMap(o=>ks.flatMap(j=>[...o[j].keys()])))];
+const g=(m,x)=>mk(ks.map(j=>(R[m][j].get(x)||[0,0])[q])),T=m=>mk(ks.map(j=>sum(R[m][j],q)));
+const rows=keys.map(x=>({x,a:g(0,x),b:g(1,x)})).sort((u,v)=>v.b.t-u.b.t),t0=T(0),t1=T(1);
+const CA=[0,1].map(m=>Object.fromEntries(ks.map(j=>[j,agg(TB[j],gD(m),x=>D.PC[x[2]])]))),cg=(m,c)=>mk(ks.map(j=>(CA[m][j].get(c)||[0,0])[q]));
+const cats=D.CAT.map((n,c)=>c).filter(c=>[0,1].some(m=>ks.some(j=>(CA[m][j].get(c)||[0,0])[q])));
+const sp=(c,n)=>[...ks.map(j=>`<span class=${c}>${n} ${LB[j]}</span>`),`<span class=${c}>${n} SSL</span>`,`<span class=${c}>${n} GD/GTR</span>`];
+const cells=o=>`<td>${fx(o.t)}</td><td>${fx(o.d)}</td><td>${fx(o.r)}</td><td>${fx(o.s)}</td><td>${fx(o.c)}</td><td>${pc(o.ssl)}</td><td>${pc(o.av)}</td>`;
+const tr=trend(Object.values(TB)),wkT=tr.W?`<div class="c"><h2>Rekap Senin–Minggu · Minggu ${S.pick} (${U})</h2>${table(['Hari',...sp('S','Sep'),...sp('O','Okt')],tr.lb.map((l,s)=>'<tr><td>'+l+'</td>'+[0,1].map(m=>tr.h[m][s]?cells(mk(tr.o[m][s])):'<td colspan=7>–</td>').join('')+'</tr>'))}</div>`:'';
+$('#sup').innerHTML=`<p class="note">Periode: <b>${per()}</b> · Satuan: <b>${U}</b>${S.cat!==''?' · Kategori: <b>'+D.CAT[S.cat]+'</b>':''}. Alur: Outlet membuat <b>GTR</b> → Warehouse mengirim stok tersedia lewat <b>GD</b> → Outlet menerima <b>GR</b>. <b>SSL</b> = GR ÷ GTR; <b>GD/GTR</b> = ketersediaan gudang. <b>SMU</b> = pemakaian outlet, <b>CP</b> = pembelian lokal outlet. Value GTR memakai harga GD (via Transfer Number). Hanya Outlet (Warehouse dikecualikan). Pada tampilan harian/mingguan, GTR memakai tanggal request sedangkan GD/GR memakai tanggal kirim/terima, sehingga SSL harian bisa &gt;100% bila pengiriman berasal dari request hari sebelumnya.</p>
+<div class="g">${ks.map(j=>kpi(LB[j]+(j==='t'?' (Request)':j==='d'?' (Supply)':j==='r'?' (Fulfill)':j==='s'?' (Pemakaian)':' (Pembelian)'),t0[j],t1[j],fx)).join('')}${kpi('SSL (GR/GTR)',t0.ssl,t1.ssl,pc)}${kpi('Ketersediaan (GD/GTR)',t0.av,t1.av,pc)}</div>
+<div class="g2"><div class="c"><h2>SSL — Top 12 ${DN()} (by GTR Okt)</h2><div class="cv"><canvas id="c1"></canvas></div></div>
+<div class="c"><h2>${tr.W?'Tren SSL Senin–Minggu (Minggu '+S.pick+')':'Tren harian SSL (tgl 1–31)'}</h2><div class="cv"><canvas id="c2"></canvas></div></div>
+<div class="c"><h2>GTR · GD · GR vs SMU · CP per Kategori — Sep (${U})</h2><div class="cv"><canvas id="c3"></canvas></div></div>
+<div class="c"><h2>GTR · GD · GR vs SMU · CP per Kategori — Okt (${U})</h2><div class="cv"><canvas id="c4"></canvas></div></div></div>
+${wkT}
+<div class="c"><h2>Rekap per Kategori (${U})</h2>${table(['Kategori',...sp('S','Sep'),...sp('O','Okt')],cats.map(c=>`<tr><td>${D.CAT[c]}</td>${cells(cg(0,c))}${cells(cg(1,c))}</tr>`))}</div>
+<div class="c"><h2>Tabel detail per ${DN()} (${U})</h2>${table([DN(),...sp('S','Sep'),...sp('O','Okt'),'Δ SSL','Δ GTR'],rows.map(({x,a,b})=>`<tr><td>${N[x]}</td>${cells(a)}${cells(b)}<td>${dpp(a.ssl,b.ssl)}</td><td>${dlt(a.t,b.t)}</td></tr>`))}</div>`;
 const[cs,co]=col(),t12=tp(rows,12);
-chart('w1',{type:'bar',data:{labels:t12.map(r=>N[r.k]),datasets:[{label:'Sep',data:t12.map(r=>r.m[0].z[4][1]),backgroundColor:cs},{label:'Okt',data:t12.map(r=>r.m[1].z[4][1]),backgroundColor:co}]}});
-const gi=S.mode==='v'?1:0;
-chart('w2',{type:'bar',data:{labels:['GR','CP','STF Krm','STF Trm','Waste'],datasets:[0,1].map(m=>({label:MN[m],backgroundColor:[cs,co][m],data:[0,1,2,3,4].map(j=>(m?t1:t0).s[j][gi])}))}});
+chart('c1',{type:'bar',data:{labels:t12.map(r=>N[r.x]),datasets:[{label:'Sep',data:t12.map(r=>r.a.ssl),backgroundColor:cs},{label:'Okt',data:t12.map(r=>r.b.ssl),backgroundColor:co}]},options:{scales:{y:{title:{display:true,text:'SSL %'}}}}});
+chart('c2',{type:'line',data:{labels:tr.lb,datasets:[0,1].map(m=>({label:MN[m],borderColor:[cs,co][m],tension:.25,spanGaps:true,data:tr.o[m].map((a,s)=>tr.h[m][s]&&a[0]?a[2]/a[0]*100:null)}))}});
+[0,1].forEach(m=>chart('c'+(3+m),{type:'bar',data:{labels:cats.map(c=>D.CAT[c]),datasets:ks.map(j=>({label:LB[j],backgroundColor:CC[j],data:cats.map(c=>cg(m,c)[j])}))}}));
+}
+function wcalc(Kf){const A={g:D.GRa,c:D.CP,i:D.STFi,o:D.STFo,w:D.W,s:D.SMU},res=new Map,get=k=>{let r=res.get(k);if(!r){r=[0,1].map(()=>({pen:[0,0],smu:[0,0],w:[0,0],so:[0,0],se:[0,0]}));res.set(k,r)}return r};
+for(const m of[0,1]){for(const j in A)agg(A[j],gD(m),Kf).forEach((a,key)=>{const o=get(key)[m],sg=j==='o'?-1:1,f=j==='s'?o.smu:j==='w'?o.w:o.pen;f[0]+=sg*a[0];f[1]+=sg*a[1]});
+agg(D.SOa,x=>x[0]===m,Kf).forEach((a,key)=>{get(key)[m].so=a});agg(D.SOe,x=>x[0]===m,Kf).forEach((a,key)=>{get(key)[m].se=a})}return res}
+function wder(o,q){const pen=o.pen[q],smu=o.smu[q],w=o.w[q],so=o.so[q],se=o.se[q],vr=pen-smu-w;return{pen,smu,w,vr,so,se,rp:pen>0?w/pen*100:null,rs:smu>0?w/smu*100:null,sel:so+vr-se}}
+function wrows(Kf,q){return[...wcalc(Kf)].map(([k,r])=>({k,m:r.map(o=>wder(o,q))}))}
+function waste(){
+const k=K(),N=NM(),M=S.g==='M',q=S.mode==='v'?1:0,fx=S.mode==='v'?fv:x=>nf(x,1),U=S.mode==='v'?'Value (Rp)':'Qty';
+const rows=wrows(k,q).sort((a,b)=>b.m[1].w-a.m[1].w);
+const tot=m=>{const o={pen:0,smu:0,w:0,so:0,se:0};rows.forEach(r=>{for(const f in o)o[f]+=r.m[m][f]});const vr=o.pen-o.smu-o.w;return{...o,vr,rp:o.pen>0?o.w/o.pen*100:null,rs:o.smu>0?o.w/o.smu*100:null,sel:o.so+vr-o.se}};
+const t0=tot(0),t1=tot(1),hd=(c,l)=>`<span class="${c}">${l}</span>`;
+const hdr=[DN()];for(const[c,n]of[['S','Sep'],['O','Okt']]){if(M)hdr.push(hd(c,n+' SO Awal'),hd(c,n+' SO Akhir'));hdr.push(hd(c,n+' Penerimaan'),hd(c,n+' SMU'),hd(c,n+' Waste'),hd(c,n+' Variance'),hd(c,n+' Waste/Penerimaan'),hd(c,n+' Waste/SMU'));if(M)hdr.push(hd(c,n+' Selisih vs SO'))}hdr.push('Δ Waste','Δ Waste Rate');
+const cl=(o)=>(M?`<td>${fx(o.so)}</td><td>${fx(o.se)}</td>`:'')+`<td>${fx(o.pen)}</td><td>${fx(o.smu)}</td><td>${fx(o.w)}</td><td>${fx(o.vr)}</td><td>${pc(o.rp)}</td><td>${pc(o.rs)}</td>`+(M?`<td>${fx(o.sel)}</td>`:'');
+const body=rows.map(r=>`<tr><td>${N[r.k]}</td>${cl(r.m[0])}${cl(r.m[1])}<td>${dlt(r.m[0].w,r.m[1].w,true)}</td><td>${dpp(r.m[0].rp,r.m[1].rp,true)}</td></tr>`);
+const byP=wrows(x=>x[2],1).sort((a,b)=>b.m[1].w-a.m[1].w),byB=wrows(x=>x[1],1).sort((a,b)=>b.m[1].w-a.m[1].w),byA=wrows(x=>D.BA[x[1]],1).sort((a,b)=>b.m[1].w-a.m[1].w);
+const hi=byB.filter(r=>r.m[1].pen>1e6&&r.m[1].rp!=null).sort((a,b)=>b.m[1].rp-a.m[1].rp)[0];
+const share=(arr,n)=>tp(arr,3).map(r=>`${n[r.k]} (${fv(r.m[1].w)})`).join(', ');
+const v0=byP.reduce((s,r)=>s+r.m[0].w,0),v1=byP.reduce((s,r)=>s+r.m[1].w,0),gp=chg(v0,v1),gs=tp(byP,3).reduce((s,r)=>s+r.m[1].w,0);
+const tr=trend([D.GRa,D.CP,D.STFi,D.STFo,D.W,D.SMU]),pn=v=>v[0]+v[1]+v[2]-v[3],wo=v=>({pen:pn(v),smu:v[5],w:v[4],vr:pn(v)-v[5]-v[4]});
+const wkT=tr.W?`<div class="c"><h2>Rekap Senin–Minggu · Minggu ${S.pick} (${U})</h2>${table(['Hari',...['Sep','Okt'].flatMap((n,i)=>['Penerimaan','SMU','Waste','Variance','Waste/Pen.'].map(h=>hd(['S','O'][i],n+' '+h)))],tr.lb.map((l,s)=>'<tr><td>'+l+'</td>'+[0,1].map(m=>{if(!tr.h[m][s])return'<td colspan=5>–</td>';const o=wo(tr.o[m][s]);return`<td>${fx(o.pen)}</td><td>${fx(o.smu)}</td><td>${fx(o.w)}</td><td>${fx(o.vr)}</td><td>${pc(o.pen>0?o.w/o.pen*100:null)}</td>`}).join('')+'</tr>'))}</div>`:'';
+$('#wst').innerHTML=`<p class="note">Periode: <b>${per()}</b> · Satuan: <b>${U}</b>. <b>Penerimaan</b> = GR + CP + STF Menerima − STF Mengirim. <b>Variance</b> = Penerimaan − SMU − Waste (perubahan stok yang diharapkan; positif = stok bertambah). <b>Waste Rate</b> = Waste ÷ Penerimaan, ditampilkan juga Waste ÷ SMU.${M?' <b>Selisih vs SO</b> = SO Awal + Variance − SO Akhir (≠ 0 berarti ada selisih stok yang belum terjelaskan).':''}</p>
+<div class="g">${kpi('Penerimaan',t0.pen,t1.pen,fx)}${kpi('SMU (Pemakaian)',t0.smu,t1.smu,fx)}${kpi('Waste',t0.w,t1.w,fx,true)}${kpi('Variance',t0.vr,t1.vr,fx)}${kpi('Waste Rate (÷Penerimaan)',t0.rp,t1.rp,pc,true)}${kpi('Waste ÷ SMU',t0.rs,t1.rs,pc,true)}${M?kpi('Selisih vs SO',t0.sel,t1.sel,fx):''}</div>
+<div class="c"><h2>Analisa Waste</h2><ul><li>Nilai waste ${gp==null?'–':gp>0?'naik':'turun'} <b>${gp==null?'–':nf(Math.abs(gp),1)+'%'}</b> dari Sep (${fv(v0)}) ke Okt (${fv(v1)}); waste ÷ penerimaan ${pc(t0.rp)} → ${pc(t1.rp)}.</li>
+<li>Kontributor waste Okt terbesar (Product): ${share(byP,D.P)} — 3 teratas = <b>${v1?nf(gs/v1*100,1)+'%':'–'}</b> dari total.</li><li>Branch dengan waste terbesar Okt: ${share(byB,D.B)}.</li><li>Waste per AM Okt: ${byA.map(r=>`${D.AM[r.k]} (${fv(r.m[1].w)})`).join(', ')}.</li>${hi?`<li>Waste ÷ penerimaan tertinggi Okt (penerimaan &gt; Rp 1 jt): <b>${D.B[hi.k]}</b> ${pc(hi.m[1].rp)}.</li>`:''}
+<li>Variance (Penerimaan − SMU − Waste): Sep ${fx(t0.vr)} → Okt ${fx(t1.vr)}. ${t1.vr>0?'Penerimaan Okt melebihi pemakaian + waste, sehingga stok cenderung menumpuk.':'Pemakaian + waste Okt melebihi penerimaan, sehingga stok cenderung menipis.'}</li></ul></div>
+<div class="g2"><div class="c"><h2>Waste — Top 12 ${DN()} (${U})</h2><div class="cv"><canvas id="w1"></canvas></div></div>
+<div class="c"><h2>Penerimaan · SMU · Waste · Variance (${U})</h2><div class="cv"><canvas id="w2"></canvas></div></div>
+<div class="c"><h2>${tr.W?'Tren Senin–Minggu':'Tren harian'} — Sep (Waste di sumbu kanan)</h2><div class="cv"><canvas id="w3"></canvas></div></div>
+<div class="c"><h2>${tr.W?'Tren Senin–Minggu':'Tren harian'} — Okt (Waste di sumbu kanan)</h2><div class="cv"><canvas id="w4"></canvas></div></div></div>
+${wkT}<div class="c"><h2>Detail per ${DN()}</h2>${table(hdr,body)}</div>`;
+const[cs,co]=col(),t12=tp(rows,12);
+chart('w1',{type:'bar',data:{labels:t12.map(r=>N[r.k]),datasets:[{label:'Sep',data:t12.map(r=>r.m[0].w),backgroundColor:cs},{label:'Okt',data:t12.map(r=>r.m[1].w),backgroundColor:co}]}});
+chart('w2',{type:'bar',data:{labels:['Penerimaan','SMU','Waste','Variance'],datasets:[0,1].map(m=>({label:MN[m],backgroundColor:[cs,co][m],data:['pen','smu','w','vr'].map(f=>(m?t1:t0)[f])}))}});
+[0,1].forEach(m=>chart('w'+(3+m),{type:'bar',data:{labels:tr.lb,datasets:[{type:'line',label:'Penerimaan',borderColor:'#3d8bd9',yAxisID:'y',tension:.25,spanGaps:true,data:tr.o[m].map((a,s)=>tr.h[m][s]?pn(a):null)},{type:'line',label:'SMU',borderColor:'#e8833a',yAxisID:'y',tension:.25,spanGaps:true,data:tr.o[m].map((a,s)=>tr.h[m][s]?a[5]:null)},{type:'bar',label:'Waste',backgroundColor:'#d9534f',yAxisID:'y1',data:tr.o[m].map((a,s)=>tr.h[m][s]?a[4]:null)}]},options:{scales:{y:{position:'left'},y1:{position:'right',grid:{drawOnChartArea:false}}}}}));
 }
 function logi(){
 const L=D.DL,mm=m=>L.filter(r=>r[0]===m),by=(m,i)=>{const r=new Map();mm(m).forEach(x=>{let a=r.get(x[i])||[0,0,0,0];a[0]+=x[3];a[1]++;a[2]+=x[4];a[3]+=x[5];r.set(x[i],a)});return r};
@@ -169,29 +201,33 @@ bar('l1',ar);bar('l3',vh);
 chart('l2',{type:'bar',data:{labels:['Sep','Okt'],datasets:[{label:'On Time',data:[o0.a,o1.a],backgroundColor:'#2e9e6b'},{label:'Terlambat',data:[o0.b,o1.b],backgroundColor:'#d9534f'}]},options:{scales:{x:{stacked:true},y:{stacked:true}}}});
 }
 function inv(){
-const bn=S.br?D.B[+S.br]:null,C=D.COGS.filter(r=>!bn||r[1]===bn),ff=fv;
-const ag=(m,rs)=>{const a=rs.reduce((s,x)=>s+x[2],0),e=rs.reduce((s,x)=>s+x[3],0),c=rs.reduce((s,x)=>s+x[4],0),avg=(a+e)/2;return{a,e,avg,c,itr:avg>0?c/avg:null,dio:c>0?avg/(c/DIM[m]):null}};
+const bn=S.br!==''?D.B[+S.br]:null,AMo=new Map(D.B.map((b,i)=>[b,D.BA[i]])),fa=r=>AMo.has(r[1])?AMo.get(r[1]):D.AM.length-1,ff=fv;
+const C=D.COGS.filter(r=>(bn===null||r[1]===bn)&&(S.am===''||fa(r)===+S.am));
+const ag=(m,rs)=>{const a=rs.reduce((s,x)=>s+x[2],0),e=rs.reduce((s,x)=>s+x[3],0),c=rs.reduce((s,x)=>s+x[4],0),avg=(a+e)/2,itr=avg>0?c/avg:null,dc=c/DIM[m];return{a,e,avg,c,itr,dio1:itr>0?DIM[m]/itr:null,dc,dio2:dc>0?avg/dc:null}};
 const t=[0,1].map(m=>ag(m,C.filter(x=>x[0]===m)));
-const wr=m=>{const r=wasteCalc(()=>0,{d:gM}).get(0);if(!r)return null;const z=r[m],av=z[5][1]+z[0][1]+z[1][1]+z[3][1]-z[2][1];return av>0?z[4][1]/av*100:null};
-const w0=wr(0),w1=wr(1),names=[...new Set(C.map(x=>x[1]))];
-const rows=names.map(n=>({n,a:ag(0,C.filter(x=>x[0]===0&&x[1]===n)),b:ag(1,C.filter(x=>x[0]===1&&x[1]===n))})).sort((p,q)=>q.b.c-p.b.c);
-$('#inv').innerHTML=`<p class="note">Bulanan saja · Basis: sheet COGS (Value Rp, level Branch). Stok awal = SO Awal, Stok akhir = SO akhir, Rata-rata = (awal+akhir)/2. ITR = COGS ÷ rata-rata stok; DIO = rata-rata stok ÷ (COGS/hari; Sep 30 hari, Okt 31 hari). Sheet COGS tidak memiliki data Product/Qty, sehingga filter Product dan satuan Qty tidak berlaku di tab ini; filter Branch berlaku. ${bn?'Branch: <b>'+bn+'</b>.':'Semua Branch.'}</p>
-<div class="g">${kpi('Stok Awal Bulan',t[0].a,t[1].a,ff)}${kpi('Stok Akhir Bulan',t[0].e,t[1].e,ff)}${kpi('Rata-rata Stok',t[0].avg,t[1].avg,ff)}${kpi('Waste Rate (bulanan)',w0,w1,pc,true)}${kpi('COGS',t[0].c,t[1].c,ff)}${kpi('ITR (x)',t[0].itr,t[1].itr,x=>nf(x,2))}${kpi('DIO (hari)',t[0].dio,t[1].dio,x=>nf(x,1),true)}</div>
-<div class="g2"><div class="c"><h2>DIO per Branch (hari) — Top 12 by COGS Okt</h2><div class="cv"><canvas id="i1"></canvas></div></div><div class="c"><h2>ITR per Branch (x) — Top 12 by COGS Okt</h2><div class="cv"><canvas id="i2"></canvas></div></div></div>
-<div class="c"><h2>Rekap Bulanan</h2>${table(['Metrik','Sep','Okt','Δ'],[['Stok Awal',t[0].a,t[1].a,ff],['Stok Akhir',t[0].e,t[1].e,ff],['Rata-rata Stok',t[0].avg,t[1].avg,ff],['COGS',t[0].c,t[1].c,ff],['ITR (x)',t[0].itr,t[1].itr,x=>nf(x,2)],['DIO (hari)',t[0].dio,t[1].dio,x=>nf(x,1)]].map(([l,a,b,g])=>`<tr><td>${l}</td><td>${g(a)}</td><td>${g(b)}</td><td>${dlt(a,b)}</td></tr>`).concat(`<tr><td>Waste Rate</td><td>${pc(w0)}</td><td>${pc(w1)}</td><td>${dpp(w0,w1,true)}</td></tr>`))}</div>
-<div class="c"><h2>Detail DIO &amp; ITR per Branch</h2>${table(['Branch','<span class=S>Sep Stok Awal</span>','<span class=S>Sep Stok Akhir</span>','<span class=S>Sep Rata²</span>','<span class=S>Sep COGS</span>','<span class=S>Sep ITR</span>','<span class=S>Sep DIO</span>','<span class=O>Okt Stok Awal</span>','<span class=O>Okt Stok Akhir</span>','<span class=O>Okt Rata²</span>','<span class=O>Okt COGS</span>','<span class=O>Okt ITR</span>','<span class=O>Okt DIO</span>','Δ DIO'],rows.map(({n,a,b})=>`<tr><td>${n}</td><td>${ff(a.a)}</td><td>${ff(a.e)}</td><td>${ff(a.avg)}</td><td>${ff(a.c)}</td><td>${nf(a.itr,2)}</td><td>${nf(a.dio,1)}</td><td>${ff(b.a)}</td><td>${ff(b.e)}</td><td>${ff(b.avg)}</td><td>${ff(b.c)}</td><td>${nf(b.itr,2)}</td><td>${nf(b.dio,1)}</td><td>${dlt(a.dio,b.dio,true)}</td></tr>`))}</div>`;
+const w=wcalc(()=>0).get(0),wr=m=>{if(!w)return null;const o=wder(w[m],1);return o.rp};const w0=wr(0),w1=wr(1);
+const kf=r=>S.dim==='a'?D.AM[fa(r)]:r[1],names=[...new Set(C.map(kf))];
+const rows=names.map(n=>({n,a:ag(0,C.filter(x=>x[0]===0&&kf(x)===n)),b:ag(1,C.filter(x=>x[0]===1&&kf(x)===n))})).sort((p,q)=>q.b.c-p.b.c);
+const lab=S.dim==='a'?'AM':'Branch',d1=x=>nf(x,1);
+const fl=(c,n)=>['Stok Awal','Stok Akhir','Rata² Stok','COGS','ITR','DIO (÷ITR)','Daily COGS','DIO (Daily COGS)'].map(h=>`<span class=${c}>${n} ${h}</span>`);
+const cl=o=>`<td>${ff(o.a)}</td><td>${ff(o.e)}</td><td>${ff(o.avg)}</td><td>${ff(o.c)}</td><td>${nf(o.itr,2)}</td><td>${d1(o.dio1)}</td><td>${ff(o.dc)}</td><td>${d1(o.dio2)}</td>`;
+$('#inv').innerHTML=`<p class="note">Bulanan · basis sheet COGS (Value Rp, level Branch). Rata-rata stok = (SO Awal + SO Akhir) ÷ 2. <b>ITR</b> = COGS ÷ rata-rata stok. <b>DIO (÷ITR)</b> = jumlah hari bulan ÷ ITR. <b>DIO (Daily COGS)</b> = rata-rata stok ÷ (COGS ÷ jumlah hari bulan). Sep = 30 hari, Okt = 31 hari. Filter Product/Kategori/Qty tidak berlaku di tab ini; filter Branch dan AM berlaku.</p>
+<div class="g">${kpi('Stok Awal Bulan',t[0].a,t[1].a,ff)}${kpi('Stok Akhir Bulan',t[0].e,t[1].e,ff)}${kpi('Rata-rata Stok',t[0].avg,t[1].avg,ff)}${kpi('Waste Rate (÷Penerimaan)',w0,w1,pc,true)}${kpi('COGS',t[0].c,t[1].c,ff)}${kpi('Daily COGS',t[0].dc,t[1].dc,ff)}${kpi('ITR (x)',t[0].itr,t[1].itr,x=>nf(x,2))}${kpi('DIO (÷ITR) hari',t[0].dio1,t[1].dio1,d1,true)}${kpi('DIO (Daily COGS) hari',t[0].dio2,t[1].dio2,d1,true)}</div>
+<div class="g2"><div class="c"><h2>DIO per ${lab} (hari) — Top 12 by COGS Okt</h2><div class="cv"><canvas id="i1"></canvas></div></div><div class="c"><h2>ITR per ${lab} (x) — Top 12 by COGS Okt</h2><div class="cv"><canvas id="i2"></canvas></div></div></div>
+<div class="c"><h2>Rekap Bulanan</h2>${table(['Metrik','Sep','Okt','Δ'],[['Stok Awal',t[0].a,t[1].a,ff],['Stok Akhir',t[0].e,t[1].e,ff],['Rata-rata Stok',t[0].avg,t[1].avg,ff],['COGS',t[0].c,t[1].c,ff],['Daily COGS',t[0].dc,t[1].dc,ff],['ITR (x)',t[0].itr,t[1].itr,x=>nf(x,2)],['DIO (÷ITR) hari',t[0].dio1,t[1].dio1,d1],['DIO (Daily COGS) hari',t[0].dio2,t[1].dio2,d1]].map(([l,a,b,g])=>`<tr><td>${l}</td><td>${g(a)}</td><td>${g(b)}</td><td>${dlt(a,b)}</td></tr>`).concat(`<tr><td>Waste Rate</td><td>${pc(w0)}</td><td>${pc(w1)}</td><td>${dpp(w0,w1,true)}</td></tr>`))}</div>
+<div class="c"><h2>Detail ITR &amp; DIO per ${lab}</h2>${table([lab,...fl('S','Sep'),...fl('O','Okt'),'Δ DIO'],rows.map(({n,a,b})=>`<tr><td>${n}</td>${cl(a)}${cl(b)}<td>${dlt(a.dio2,b.dio2,true)}</td></tr>`))}</div>`;
 const[cs,co]=col(),t12=tp(rows,12),bar=(id,f)=>chart(id,{type:'bar',data:{labels:t12.map(r=>r.n),datasets:[{label:'Sep',data:t12.map(r=>r.a[f]),backgroundColor:cs},{label:'Okt',data:t12.map(r=>r.b[f]),backgroundColor:co}]}});
-bar('i1','dio');bar('i2','itr');
+bar('i1','dio2');bar('i2','itr');
 }
 const R={sup:supply,wst:waste,log:logi,inv:inv};
 function render(){R[S.tab]()}
-function fillPick(){const p=$('#pick');p.disabled=S.g==='M';p.innerHTML=S.g==='D'?Array.from({length:31},(_,i)=>`<option value="${i+1}">Tgl ${i+1} (Sep vs Okt)</option>`).join(''):S.g==='W'?[1,2,3,4,5].map(w=>`<option value="${w}">Minggu ${w} (tgl ${w*7-6}–${Math.min(w*7,31)})</option>`).join(''):'<option>Satu bulan penuh</option>';S.pick=1}
-function fillSel(){const o=(a,l)=>`<option value="">${l}</option>`+a.map((x,i)=>`<option value="${i}">${x}</option>`).join('');$('#br').innerHTML=o(D.B,'Semua Branch');$('#pr').innerHTML=o(D.P,'Semua Product');S.br='';S.pr=''}
+function fillPick(){const p=$('#pick');p.disabled=S.g==='M';p.innerHTML=S.g==='D'?Array.from({length:31},(_,i)=>`<option value="${i+1}">Tgl ${i+1} (Sep vs Okt)</option>`).join(''):S.g==='W'?[1,2,3,4,5].map(w=>`<option value="${w}">Minggu ${w} · Sep ${wrange(0,w)} | Okt ${wrange(1,w)}</option>`).join(''):'<option>Satu bulan penuh</option>';S.pick=1}
+function fillSel(){const o=(a,l)=>`<option value="">${l}</option>`+a.map((x,i)=>`<option value="${i}">${x}</option>`).join('');$('#br').innerHTML=o(D.B,'Semua Branch');$('#pr').innerHTML=o(D.P,'Semua Product');WH=D.B.map(b=>b.startsWith('Warehouse'));const used=new Set(D.B.map((b,i)=>WH[i]?-1:D.BA[i]));$('#am').innerHTML='<option value="">Semua AM</option>'+D.AM.map((x,i)=>used.has(i)?`<option value="${i}">${x}</option>`:'').join('');$('#cat').innerHTML=o(D.CAT,'Semua Kategori');S.br=S.pr=S.am=S.cat=''}
 function wire(){
 $('#g').onchange=e=>{S.g=e.target.value;fillPick();render()};
 $('#pick').onchange=e=>{S.pick=+e.target.value;render()};
 $('#dim').onchange=e=>{S.dim=e.target.value;render()};
-$('#br').onchange=e=>{S.br=e.target.value;render()};$('#pr').onchange=e=>{S.pr=e.target.value;render()};
+$('#br').onchange=e=>{S.br=e.target.value;render()};$('#am').onchange=e=>{S.am=e.target.value;render()};$('#cat').onchange=e=>{S.cat=e.target.value;render()};$('#pr').onchange=e=>{S.pr=e.target.value;render()};
 $('#mode').onchange=e=>{S.mode=e.target.value;render()};
 $('#rf').onclick=boot;
 $('#tabs').onclick=e=>{const t=e.target.dataset.t;if(!t)return;S.tab=t;document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b===e.target));document.querySelectorAll('section').forEach(s=>s.classList.toggle('on',s.id===t));render()};fillPick()}
